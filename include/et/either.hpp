@@ -10,13 +10,13 @@ namespace et {
 
 namespace detail {
 
-struct PlaceSuccessType final {};
-struct PlaceErrorType final {};
+struct SuccessTagImplType final {};
+struct ErrorTagImplType final {};
 
 }  // namespace detail
 
-constexpr detail::PlaceSuccessType PlaceSuccess{};
-constexpr detail::PlaceErrorType PlaceError{};
+constexpr detail::SuccessTagImplType SuccessTag{};
+constexpr detail::ErrorTagImplType ErrorTag{};
 
 class EitherException : public std::logic_error {
  public:
@@ -25,8 +25,8 @@ class EitherException : public std::logic_error {
 
 namespace detail {
 
-using SuccessTagType = decltype(PlaceSuccess) const&;
-using ErrorTagType = decltype(PlaceError) const&;
+using SuccessTagType = decltype(SuccessTag) const&;
+using ErrorTagType = decltype(ErrorTag) const&;
 
 namespace meta {
 
@@ -46,6 +46,62 @@ template <template <class> class F, class... Ts>
 using All = Conjuction<F<Ts>::value...>;
 
 }  // namespace meta
+
+template <class S, class E, bool>
+class Storage;
+
+template <class S>
+class Storage<S, void, true> {
+ public:
+  using SuccessType = S;
+  using ErrorType = void;
+
+ protected:
+  static constexpr auto kNoThrowSuccCopyCtor =
+      std::is_nothrow_copy_constructible<SuccessType>::value;
+  static constexpr auto kNoThrowSuccMoveCtor =
+      std::is_nothrow_move_constructible<SuccessType>::value;
+
+  Storage(SuccessTagType,
+          SuccessType const& succ_val) noexcept(kNoThrowSuccCopyCtor)
+      : succ_val_(succ_val) {}
+
+  Storage(SuccessTagType, SuccessType&& succ_val) noexcept(kNoThrowSuccMoveCtor)
+      : succ_val_(std::move(succ_val)) {}
+
+ public:
+  constexpr bool IsSuccess() const noexcept { return true; }
+  constexpr bool IsError() const noexcept { return false; }
+
+ protected:
+  SuccessType succ_val_;
+};
+
+template <class E>
+class Storage<void, E, true> {
+ public:
+  using SuccessType = void;
+  using ErrorType = E;
+
+ protected:
+  static constexpr auto kNoThrowSuccCopyCtor =
+      std::is_nothrow_copy_constructible<ErrorType>::value;
+  static constexpr auto kNoThrowSuccMoveCtor =
+      std::is_nothrow_move_constructible<ErrorType>::value;
+
+  Storage(ErrorTagType, ErrorType const& err_val) noexcept(kNoThrowSuccCopyCtor)
+      : err_val_(err_val) {}
+
+  Storage(ErrorTagType, ErrorType&& err_val) noexcept(kNoThrowSuccMoveCtor)
+      : err_val_(std::move(err_val)) {}
+
+ public:
+  constexpr bool IsSuccess() const noexcept { return false; }
+  constexpr bool IsError() const noexcept { return true; }
+
+ protected:
+  ErrorType err_val_;
+};
 
 // default case: false
 template <class S, class E,
@@ -86,21 +142,21 @@ class Storage {
   static constexpr auto kNoThrowErrMoveCtor = kNoThrowMoveCtor<ErrorType>;
 
   explicit constexpr Storage(
-      decltype(PlaceSuccess) const&,
+      decltype(SuccessTag) const&,
       SuccessType const& succ_val) noexcept(kNoThrowSuccCopyCtor)
       : is_success_(true), succ_val_(succ_val) {}
 
   explicit constexpr Storage(
-      decltype(PlaceSuccess) const&,
+      decltype(SuccessTag) const&,
       SuccessType&& succ_val) noexcept(kNoThrowSuccMoveCtor)
       : is_success_(true), succ_val_(std::move(succ_val)) {}
 
   explicit constexpr Storage(
-      decltype(PlaceError) const&,
+      decltype(ErrorTag) const&,
       ErrorType const& err_val) noexcept(kNothrowErrCopyCtor)
       : is_success_(false), err_val_(err_val) {}
 
-  explicit constexpr Storage(decltype(PlaceError) const&,
+  explicit constexpr Storage(decltype(ErrorTag) const&,
                              ErrorType&& err_val) noexcept(kNoThrowErrMoveCtor)
       : is_success_(false), err_val_(std::move(err_val)) {}
 
@@ -144,21 +200,21 @@ class Storage<S, E, true> {
   static constexpr auto kNoThrowErrMoveCtor = kNoThrowMoveCtor<ErrorType>;
 
   explicit constexpr Storage(
-      decltype(PlaceSuccess) const&,
+      decltype(SuccessTag) const&,
       SuccessType const& succ_val) noexcept(kNoThrowSuccCopyCtor)
       : is_success_(true), succ_val_(succ_val) {}
 
   explicit constexpr Storage(
-      decltype(PlaceSuccess) const&,
+      decltype(SuccessTag) const&,
       SuccessType&& succ_val) noexcept(kNoThrowSuccMoveCtor)
       : is_success_(true), succ_val_(std::move(succ_val)) {}
 
   explicit constexpr Storage(
-      decltype(PlaceError) const&,
+      decltype(ErrorTag) const&,
       ErrorType const& err_val) noexcept(kNothrowErrCopyCtor)
       : is_success_(false), err_val_(err_val) {}
 
-  explicit constexpr Storage(decltype(PlaceError) const&,
+  explicit constexpr Storage(decltype(ErrorTag) const&,
                              ErrorType&& err_val) noexcept(kNoThrowErrMoveCtor)
       : is_success_(false), err_val_(std::move(err_val)) {}
 
@@ -177,144 +233,40 @@ class Storage<S, E, true> {
 }  // namespace detail
 
 template <class S, class E>
-class Either;
-
-template <class S>
-class Either<S, void> {
- public:
-  using SuccessType = S;
-  using ErrorType = void;
-
+class Either final : public detail::Storage<S, E> {
  private:
-  static constexpr auto kNoThrowSuccCopyCtor =
-      std::is_nothrow_copy_constructible<SuccessType>::value;
-  static constexpr auto kNoThrowSuccMoveCtor =
-      std::is_nothrow_move_constructible<SuccessType>::value;
+  using Base = detail::Storage<S, E>;
 
-  template <class SS>
-  static constexpr auto kNoThrowAssignableFrom =
-      std::is_nothrow_assignable<SuccessType, SS>::value;
-
-  template <class SS, class EE>
-  static constexpr auto kCanNoThrowAssignThat =
-      kNoThrowAssignableFrom<SS>&& std::is_void<EE>::value;
-
-  explicit constexpr Either(SuccessType const& succ_val) noexcept(
-      kNoThrowSuccCopyCtor)
-      : succ_val_(succ_val) {}
-
-  explicit constexpr Either(SuccessType&& succ_val) noexcept(
-      kNoThrowSuccMoveCtor)
-      : succ_val_(std::move(succ_val)) {}
+  template <class... Args>
+  constexpr Either(Args... args) noexcept(
+      std::is_nothrow_constructible<Base, Args...>::value)
+      : Base(std::forward<Args>(args)...) {}
 
  public:
-  template <class EE>
-  constexpr Either& operator=(Either<SuccessType, EE> const& that) noexcept(
-      kCanNoThrowAssignThat<SuccessType, EE>) {
-    if (that.IsSuccess()) {
-      succ_val_ = that.succ_val_;
-    } else {
-      throw EitherException("[et::Either] assigning non-success to success");
-    }
-
-    return *this;
-  }
-
-  template <class EE>
-  constexpr Either& operator=(Either<SuccessType, EE>&& that) noexcept(
-      kCanNoThrowAssignThat<SuccessType, EE>) {
-    if (that.IsSuccess()) {
-      succ_val_ = std::move(that.succ_val_);
-    } else {
-      throw EitherException("[et::Either] assigning non-success to success");
-    }
-
-    return *this;
-  }
+  using SuccessType = typename Base::SuccessType;
+  using ErrorType = typename Base::ErrorType;
 
   template <class SS>
   friend constexpr std::enable_if_t<
-      std::is_same<SuccessType, std::decay_t<SS>>::value, Either>
+      detail::meta::Conjuction<
+          !std::is_same<SuccessType, void>::value,
+          std::is_same<SuccessType, std::decay_t<SS>>::value>::value,
+      Either>
   Success(SS&& succ_val) noexcept(
-      std::is_nothrow_constructible<Either, SS>::value) {
-    return Either(std::forward<SS>(succ_val));
-  }
-
-  constexpr bool IsSuccess() const noexcept { return true; }
-  constexpr bool IsError() const noexcept { return false; }
-
- protected:
-  SuccessType succ_val_;
-};
-
-template <class E>
-class Either<void, E> {
- public:
-  using SuccessType = void;
-  using ErrorType = E;
-
- private:
-  static constexpr auto kNoThrowErrCopyCtor =
-      std::is_nothrow_copy_constructible<ErrorType>::value;
-  static constexpr auto kNoThrowErrMoveCtor =
-      std::is_nothrow_move_constructible<ErrorType>::value;
-
-  template <class EE>
-  static constexpr auto kNoThrowAssignableFrom =
-      std::is_nothrow_assignable<ErrorType, EE>::value;
-
-  template <class SS, class EE>
-  static constexpr auto kCanNoThrowAssignThat =
-      kNoThrowAssignableFrom<EE>and std::is_void<SS>::value;
-
- public:
-  explicit constexpr Either(ErrorType const& err_val) noexcept(
-      kNoThrowErrCopyCtor)
-      : err_val_(err_val) {}
-
-  explicit constexpr Either(ErrorType&& err_val) noexcept(kNoThrowErrMoveCtor)
-      : err_val_(std::move(err_val)) {}
-
-  template <class SS>
-  constexpr Either& operator=(Either<SS, ErrorType> const& that) noexcept(
-      kCanNoThrowAssignThat<SS, ErrorType>) {
-    if (that.IsError()) {
-      err_val_ = that.err_val_;
-    } else {
-      throw EitherException("[et::Either] assigning non-error to error");
-    }
-    return *this;
-  }
-
-  template <class SS>
-  constexpr Either& operator=(Either<SS, ErrorType>&& that) noexcept(
-      kCanNoThrowAssignThat<SS, ErrorType>) {
-    if (that.IsError()) {
-      err_val_ = std::move(that.err_val_);
-    } else {
-      throw EitherException("[et::Either] assigning non-error to error");
-    }
-    return *this;
+      std::is_nothrow_constructible<Base, detail::SuccessTagType, SS>::value) {
+    return Either(SuccessTag, std::forward<SS>(succ_val));
   }
 
   template <class EE>
   friend constexpr std::enable_if_t<
-      std::is_same<ErrorType, std::decay_t<EE>>::value, Either>
-  Success(EE&& succ_val) noexcept(
-      std::is_nothrow_constructible<Either, EE>::value) {
-    return Either(std::forward<EE>(succ_val));
-  }
-
-  constexpr bool IsSuccess() const noexcept { return false; }
-  constexpr bool IsError() const noexcept { return true; }
-
- private:
-  ErrorType err_val_;
-};
-
-template <class S, class E>
-class Either {
-
+      detail::meta::Conjuction<
+          !std::is_same<ErrorType, void>::value,
+          std::is_same<ErrorType, std::decay_t<EE>>::value>::value,
+      Either>
+  Err(EE&& err_val) noexcept(
+      std::is_nothrow_constructible<Base, detail::ErrorTagType, EE>::value){
+      return Either(ErrorTag, std::forward<EE>(err_val));
+  };
 };
 
 }  // namespace et
