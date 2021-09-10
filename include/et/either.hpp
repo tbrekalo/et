@@ -69,32 +69,21 @@ class Storage {
   using SuccessType = S;
   using ErrorType = E;
 
-  template <class T>
-  static constexpr auto kNoThrowCopyCtor =
-      std::is_nothrow_copy_constructible<T>::value;
-
-  template <class T>
-  static constexpr auto kNoThrowMoveCtor =
-      std::is_nothrow_move_constructible<T>::value;
-
-  static constexpr auto kNoThrowSuccCopyCtor = kNoThrowCopyCtor<SuccessType>;
-  static constexpr auto kNoThrowSuccMoveCtor = kNoThrowMoveCtor<SuccessType>;
-
-  static constexpr auto kNoThrowErrCopyCtor = kNoThrowCopyCtor<ErrorType>;
-  static constexpr auto kNoThrowErrMoveCtor = kNoThrowMoveCtor<ErrorType>;
-
  protected:
-  constexpr Storage(SuccessTagType,
-          SuccessType const& succ_val) noexcept(kNoThrowSuccCopyCtor)
+  constexpr Storage(SuccessTagType, SuccessType const& succ_val) noexcept(
+      std::is_nothrow_copy_constructible<SuccessType>::value)
       : state_(StorageState::kHasSuccess), succ_val_(succ_val) {}
 
-  constexpr Storage(SuccessTagType, SuccessType&& succ_val) noexcept(kNoThrowSuccMoveCtor)
+  constexpr Storage(SuccessTagType, SuccessType&& succ_val) noexcept(
+      std::is_nothrow_move_constructible<SuccessType>::value)
       : state_(StorageState::kHasSuccess), succ_val_(std::move(succ_val)) {}
 
-  constexpr Storage(ErrorTagType, ErrorType const& err_val) noexcept(kNoThrowErrCopyCtor)
+  constexpr Storage(ErrorTagType, ErrorType const& err_val) noexcept(
+      std::is_nothrow_copy_constructible<ErrorType>::value)
       : state_(StorageState::kHasError), err_val_(err_val) {}
 
-  constexpr Storage(ErrorTagType, ErrorType&& err_val) noexcept(kNoThrowErrMoveCtor)
+  constexpr Storage(ErrorTagType, ErrorType&& err_val) noexcept(
+      std::is_nothrow_move_constructible<ErrorType>::value)
       : state_(StorageState::kHasError), err_val_(std::move(err_val)) {}
 
   StorageState state_;
@@ -110,32 +99,21 @@ class Storage<S, E, false> {
   using SuccessType = S;
   using ErrorType = E;
 
-  template <class T>
-  static constexpr auto kNoThrowCopyCtor =
-      std::is_nothrow_copy_constructible<T>::value;
-
-  template <class T>
-  static constexpr auto kNoThrowMoveCtor =
-      std::is_nothrow_move_constructible<T>::value;
-
-  static constexpr auto kNoThrowSuccCopyCtor = kNoThrowCopyCtor<SuccessType>;
-  static constexpr auto kNoThrowSuccMoveCtor = kNoThrowMoveCtor<SuccessType>;
-
-  static constexpr auto kNoThrowErrCopyCtor = kNoThrowCopyCtor<ErrorType>;
-  static constexpr auto kNoThrowErrMoveCtor = kNoThrowMoveCtor<ErrorType>;
-
  protected:
-  Storage(SuccessTagType,
-          SuccessType const& succ_val) noexcept(kNoThrowSuccCopyCtor)
+  constexpr Storage(SuccessTagType, SuccessType const& succ_val) noexcept(
+      std::is_nothrow_copy_constructible<SuccessType>::value)
       : state_(StorageState::kHasSuccess), succ_val_(succ_val) {}
 
-  Storage(SuccessTagType, SuccessType&& succ_val) noexcept(kNoThrowSuccMoveCtor)
+  constexpr Storage(SuccessTagType, SuccessType&& succ_val) noexcept(
+      std::is_nothrow_move_constructible<SuccessType>::value)
       : state_(StorageState::kHasSuccess), succ_val_(std::move(succ_val)) {}
 
-  Storage(ErrorTagType, ErrorType const& err_val) noexcept(kNoThrowErrCopyCtor)
+  constexpr Storage(ErrorTagType, ErrorType const& err_val) noexcept(
+      std::is_nothrow_copy_constructible<ErrorType>::value)
       : state_(StorageState::kHasError), err_val_(err_val) {}
 
-  Storage(ErrorTagType, ErrorType&& err_val) noexcept(kNoThrowErrMoveCtor)
+  constexpr Storage(ErrorTagType, ErrorType&& err_val) noexcept(
+      std::is_nothrow_move_constructible<ErrorType>::value)
       : state_(StorageState::kHasError), err_val_(std::move(err_val)) {}
 
   ~Storage() noexcept(
@@ -179,18 +157,12 @@ class Either<S, void> final : detail::EitherConstraints<S, void> {
   using SuccessType = S;
   using ErrorType = void;
 
- private:
-  static constexpr auto kNoThrowCopyCtor =
-      std::is_nothrow_copy_constructible<SuccessType>::value;
-  static constexpr auto kNoThrowMoveCtor =
-      std::is_nothrow_move_constructible<SuccessType>::value;
-
- public:
   explicit constexpr Either(SuccessType const& succ_val) noexcept(
-      kNoThrowCopyCtor)
+      std::is_nothrow_copy_constructible<SuccessType>::value)
       : succ_val_(succ_val) {}
 
-  explicit constexpr Either(SuccessType&& succ_val) noexcept(kNoThrowMoveCtor)
+  explicit constexpr Either(SuccessType&& succ_val) noexcept(
+      std::is_nothrow_move_constructible<ErrorType>::value)
       : succ_val_(std::move(succ_val)) {}
 
   constexpr auto IsSuccess() const noexcept -> bool { return true; }
@@ -278,39 +250,29 @@ class Either final : private detail::Storage<S, E> {
   using SuccessType = typename Base::SuccessType;
   using ErrorType = typename Base::ErrorType;
 
- private:
-  static constexpr auto kNoThrowCopyCtor =
-      detail::meta::Conjuction<Base::kNoThrowSuccCopyCtor,
-                               Base::kNoThrowErrCopyCtor>::value;
-
-  static constexpr auto kNoThrowMoveCtor =
-      detail::meta::Conjuction<Base::kNoThrowSuccMoveCtor,
-                               Base::kNoThrowErrMoveCtor>::value;
-
- public:
   constexpr operator bool() const noexcept { return this->IsSuccess(); }
 
   constexpr Either(Either const&) = default;
   constexpr Either(Either&&) = default;
 
-  constexpr Either operator=(Either const&) = default;
-  constexpr Either operator==(Either&&) = default;
+  constexpr Either& operator=(Either const&) = default;
+  constexpr Either& operator=(Either&&) = default;
 
   constexpr Either(Either<SuccessType, void> const& that) noexcept(
-      Base::kNoThrowSuccCopyCtor)
+      std::is_nothrow_copy_constructible<SuccessType>::value)
       : Base(SuccessTag, that.Success()) {}
 
   constexpr Either(Either<SuccessType, void>&& that) noexcept(
-      Base::kNoThrowSuccMoveCtor)
+      std::is_nothrow_move_constructible<SuccessType>::value)
       : Base(SuccessTag,
              static_cast<Either<SuccessType, void>>(that).Success()) {}
 
   constexpr Either(Either<void, ErrorType> const& that) noexcept(
-      Base::kNoThrowErrCopyCtor)
+      std::is_nothrow_copy_constructible<ErrorType>::value)
       : Base(ErrorTag, that.Error()) {}
 
   constexpr Either(Either<void, ErrorType>&& that) noexcept(
-      Base::kNoThrowErrMoveCtor)
+      std::is_nothrow_move_constructible<ErrorType>::value)
       : Base(ErrorTag, static_cast<Either<void, ErrorType>>(that).Error()) {}
 
   // Access
