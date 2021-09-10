@@ -5,36 +5,32 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
-
 namespace et {
 
-// forward declaration for friendship
 template <class S, class E>
 class Either;
-
-// forward declarations for friendship
-template <class SS>
-constexpr Either<SS, void> Success(SS);
-
-template <class EE>
-constexpr Either<void, EE> Err(EE);
 
 namespace detail {
 
 struct SuccessTagImpl {};
-struct ErrTagImpl {};
+struct ErrorTagImpl {};
 
 using SuccessTagType = SuccessTagImpl const&;
-using ErrTagType = ErrTagImpl const&;
+using ErrorTagType = ErrorTagImpl const&;
 
 }  // namespace detail
 
 constexpr detail::SuccessTagImpl SuccessTag;
-constexpr detail::ErrTagImpl ErrTag;
+constexpr detail::ErrorTagImpl ErrorTag;
 
 class BadEitherAccess : public std::logic_error {
  public:
   explicit BadEitherAccess(char const* msg) : std::logic_error(msg) {}
+};
+
+class BadEitherAssign : public std::logic_error {
+ public:
+  explicit BadEitherAssign(char const* msg) : std::logic_error(msg) {}
 };
 
 namespace detail {
@@ -63,27 +59,16 @@ using NotVoid = BoolConstant<!std::is_void<T>::value>;
 
 }  // namespace meta
 
-#define STEAL_SUCCESS(ST) std::move(ST).Success()
-#define STEAL_ERROR(ST) std::move(ST).Err()
+enum class StorageState { kEmpty, kHasError, kHasSuccess };
 
-template <class S, class E>
-class UnitStorage;
-
-// NOTE: should never be instantiated
-// only to avoid ambiguous partial specialization error
-template <>
-class UnitStorage<void, void> {};
-
-template <class S, class E>
-class UnionStorage {
+// default case for trivially destructible
+template <class S, class E,
+          bool = meta::All<std::is_trivially_destructible, S, E>::value>
+class Storage {
  public:
   using SuccessType = S;
   using ErrorType = E;
 
-  static_assert(meta::All<meta::NotVoid, SuccessType, ErrorType>::value,
-                "[et::detail::UnionStorage] void type");
-
- protected:
   template <class T>
   static constexpr auto kNoThrowCopyCtor =
       std::is_nothrow_copy_constructible<T>::value;
@@ -92,75 +77,121 @@ class UnionStorage {
   static constexpr auto kNoThrowMoveCtor =
       std::is_nothrow_move_constructible<T>::value;
 
- public:
-  // TODO: constructors, only copy and move
-  UnionStorage(UnitStorage<SuccessType, void>&& that)
-      : is_success_(true), succ_val_(STEAL_SUCCESS(that)) {}
+  static constexpr auto kNoThrowSuccCopyCtor = kNoThrowCopyCtor<SuccessType>;
+  static constexpr auto kNoThrowSuccMoveCtor = kNoThrowMoveCtor<SuccessType>;
 
-  UnionStorage(UnitStorage<void, ErrorType>&& that)
-      : is_success_(false), err_val_(STEAL_ERROR(that)) {}
-
-  constexpr auto IsSuccess() const noexcept -> bool { return is_success_; }
-  constexpr auto IsError() const noexcept -> bool { return !is_success_; }
-
-  constexpr auto Success() & -> SuccessType& {
-    return is_success_
-               ? succ_val_
-               : (throw BadEitherAccess(
-                     "[et::Either<S, E>::Success] invalid state access"));
-  }
-
-  constexpr auto Success() const& -> SuccessType const& {
-    return is_success_
-               ? succ_val_
-               : (throw BadEitherAccess(
-                     "[et::Either<S, E>::Success] invalid state access"));
-  }
-
-  constexpr auto Success() && -> SuccessType&& {
-    return is_success_
-               ? std::move(succ_val_)
-               : (throw BadEitherAccess(
-                     "[et::Either<S, E>::Success] invalid state access"));
-  }
-
-  constexpr auto Err() & -> ErrorType& {
-    return !is_success_ ? err_val_
-                        : (throw BadEitherAccess(
-                              "[et::Either<S, E>::Err] invalid state access"));
-  }
-
-  constexpr auto Err() const& -> ErrorType const& {
-    return !is_success_ ? err_val_
-                        : (throw BadEitherAccess(
-                              "[et::Either<S, E>::Err] invalid state access"));
-  }
-
-  constexpr auto Err() && -> ErrorType&& {
-    return !is_success_ ? std::move(err_val_)
-                        : (throw BadEitherAccess(
-                              "[et::Either<S, E>::Err] invalid state access"));
-  }
+  static constexpr auto kNoThrowErrCopyCtor = kNoThrowCopyCtor<ErrorType>;
+  static constexpr auto kNoThrowErrMoveCtor = kNoThrowMoveCtor<ErrorType>;
 
  protected:
-  bool is_success_;
+  constexpr Storage(SuccessTagType,
+          SuccessType const& succ_val) noexcept(kNoThrowSuccCopyCtor)
+      : state_(StorageState::kHasSuccess), succ_val_(succ_val) {}
+
+  constexpr Storage(SuccessTagType, SuccessType&& succ_val) noexcept(kNoThrowSuccMoveCtor)
+      : state_(StorageState::kHasSuccess), succ_val_(std::move(succ_val)) {}
+
+  constexpr Storage(ErrorTagType, ErrorType const& err_val) noexcept(kNoThrowErrCopyCtor)
+      : state_(StorageState::kHasError), err_val_(err_val) {}
+
+  constexpr Storage(ErrorTagType, ErrorType&& err_val) noexcept(kNoThrowErrMoveCtor)
+      : state_(StorageState::kHasError), err_val_(std::move(err_val)) {}
+
+  StorageState state_;
   union {
     SuccessType succ_val_;
     ErrorType err_val_;
   };
 };
 
+template <class S, class E>
+class Storage<S, E, false> {
+ public:
+  using SuccessType = S;
+  using ErrorType = E;
+
+  template <class T>
+  static constexpr auto kNoThrowCopyCtor =
+      std::is_nothrow_copy_constructible<T>::value;
+
+  template <class T>
+  static constexpr auto kNoThrowMoveCtor =
+      std::is_nothrow_move_constructible<T>::value;
+
+  static constexpr auto kNoThrowSuccCopyCtor = kNoThrowCopyCtor<SuccessType>;
+  static constexpr auto kNoThrowSuccMoveCtor = kNoThrowMoveCtor<SuccessType>;
+
+  static constexpr auto kNoThrowErrCopyCtor = kNoThrowCopyCtor<ErrorType>;
+  static constexpr auto kNoThrowErrMoveCtor = kNoThrowMoveCtor<ErrorType>;
+
+ protected:
+  Storage(SuccessTagType,
+          SuccessType const& succ_val) noexcept(kNoThrowSuccCopyCtor)
+      : state_(StorageState::kHasSuccess), succ_val_(succ_val) {}
+
+  Storage(SuccessTagType, SuccessType&& succ_val) noexcept(kNoThrowSuccMoveCtor)
+      : state_(StorageState::kHasSuccess), succ_val_(std::move(succ_val)) {}
+
+  Storage(ErrorTagType, ErrorType const& err_val) noexcept(kNoThrowErrCopyCtor)
+      : state_(StorageState::kHasError), err_val_(err_val) {}
+
+  Storage(ErrorTagType, ErrorType&& err_val) noexcept(kNoThrowErrMoveCtor)
+      : state_(StorageState::kHasError), err_val_(std::move(err_val)) {}
+
+  ~Storage() noexcept(
+      meta::All<std::is_nothrow_destructible, SuccessType, ErrorType>::value) {
+    if (state_ == StorageState::kHasSuccess) {
+      succ_val_.~SuccessType();
+    } else if (state_ == StorageState::kHasError) {
+      err_val_.~ErrorType();
+    }
+  }
+
+  StorageState state_;
+  union {
+    SuccessType succ_val_;
+    ErrorType err_val_;
+  };
+};
+
+template <class S, class E>
+struct EitherConstraints {
+  using SuccessType = S;
+  using ErrorType = E;
+
+  static_assert(
+      not detail::meta::Conjuction<std::is_void<SuccessType>::value,
+                                   std::is_void<ErrorType>::value>::value,
+      "[et::Either] Either<void, void> ill formed");
+
+  static_assert(not std::is_reference<SuccessType>::value,
+                "[et::Either] Either<SuccessType&, ErrorType> ill formed");
+
+  static_assert(not std::is_reference<ErrorType>::value,
+                "[et::Either] Either<SuccessType, ErrorType&> ill formed");
+};
+
+}  // namespace detail
+
 template <class S>
-class UnitStorage<S, void> {
+class Either<S, void> final : detail::EitherConstraints<S, void> {
  public:
   using SuccessType = S;
   using ErrorType = void;
 
-  static_assert(meta::NotVoid<SuccessType>::value,
-                "[et::detail::UnitStorage<S, void>] S is void");
+ private:
+  static constexpr auto kNoThrowCopyCtor =
+      std::is_nothrow_copy_constructible<SuccessType>::value;
+  static constexpr auto kNoThrowMoveCtor =
+      std::is_nothrow_move_constructible<SuccessType>::value;
 
-  UnitStorage(SuccessType const& succ_val) : succ_val_(succ_val) {}
-  UnitStorage(SuccessType&& succ_val) : succ_val_(std::move(succ_val)) {}
+ public:
+  explicit constexpr Either(SuccessType const& succ_val) noexcept(
+      kNoThrowCopyCtor)
+      : succ_val_(succ_val) {}
+
+  explicit constexpr Either(SuccessType&& succ_val) noexcept(kNoThrowMoveCtor)
+      : succ_val_(std::move(succ_val)) {}
 
   constexpr auto IsSuccess() const noexcept -> bool { return true; }
   constexpr auto IsError() const noexcept -> bool { return false; }
@@ -177,25 +208,33 @@ class UnitStorage<S, void> {
     return std::move(succ_val_);
   }
 
-  constexpr auto Err() const -> ErrorType {
-    throw BadEitherAccess("[et::Either<S, void>::Err]");
+  constexpr auto Error() const -> ErrorType {
+    throw BadEitherAccess("[et::Either<S, void>::Error]");
   }
 
- protected:
+ private:
   SuccessType succ_val_;
 };
 
 template <class E>
-class UnitStorage<void, E> {
+class Either<void, E> {
  public:
   using SuccessType = void;
   using ErrorType = E;
 
-  static_assert(meta::NotVoid<E>::value,
-                "[et::detail::UnitStorage<void, E>] E is void");
+ private:
+  static constexpr auto kNoThrowCopyCtor =
+      std::is_nothrow_copy_constructible<ErrorType>::value;
+  static constexpr auto kNoThrowMoveCtor =
+      std::is_nothrow_move_constructible<ErrorType>::value;
 
-  UnitStorage(ErrorType const& err_val_) : err_val_(err_val_) {}
-  UnitStorage(ErrorType&& err_val) : err_val_(std::move(err_val)) {}
+ public:
+  explicit constexpr Either(ErrorType const& err_val_) noexcept(
+      kNoThrowCopyCtor)
+      : err_val_(err_val_) {}
+
+  explicit constexpr Either(ErrorType&& err_val) noexcept(kNoThrowMoveCtor)
+      : err_val_(std::move(err_val)) {}
 
   constexpr auto IsSuccess() const noexcept -> bool { return false; }
   constexpr auto IsError() const noexcept -> bool { return true; }
@@ -204,13 +243,15 @@ class UnitStorage<void, E> {
     throw BadEitherAccess("[et::Either<void, E>::Success]");
   }
 
-  constexpr auto Err() & noexcept -> ErrorType& { return err_val_; }
-  constexpr auto Err() const& noexcept -> ErrorType const& { return err_val_; }
+  constexpr auto Error() & noexcept -> ErrorType& { return err_val_; }
+  constexpr auto Error() const& noexcept -> ErrorType const& {
+    return err_val_;
+  }
 
-  constexpr auto Err() && noexcept -> ErrorType&& {
+  constexpr auto Error() && noexcept -> ErrorType&& {
     return std::move(err_val_);
   }
-  constexpr auto Err() const&& noexcept -> ErrorType const&& {
+  constexpr auto Error() const&& noexcept -> ErrorType const&& {
     return std::move(err_val_);
   }
 
@@ -218,61 +259,132 @@ class UnitStorage<void, E> {
   ErrorType err_val_;
 };
 
-template <class S, class E>
-using PickStorage = std::conditional_t<meta::All<meta::NotVoid, S, E>::value,
-                                       UnionStorage<S, E>, UnitStorage<S, E>>;
+template <class SS>
+constexpr auto Success(SS&& succ_val) {
+  return Either<std::decay_t<SS>, void>(std::forward<SS>(succ_val));
+}
 
-}  // namespace detail
+template <class EE>
+constexpr auto Error(EE&& err_val) {
+  return Either<void, std::decay_t<EE>>(std::forward<EE>(err_val));
+}
 
 template <class S, class E>
-class Either final : public detail::PickStorage<S, E> {
+class Either final : private detail::Storage<S, E> {
  private:
-  using Base = detail::PickStorage<S, E>;
-
-  template <class... Args>
-  Either(Args&&... args) : Base(std::forward<Args>(args)...) {}
+  using Base = detail::Storage<S, E>;
 
  public:
   using SuccessType = typename Base::SuccessType;
   using ErrorType = typename Base::ErrorType;
 
-  Either(detail::UnitStorage<SuccessType, void>&& that) : Base(that) {}
-  Either(detail::UnitStorage<void, ErrorType>&& that) : Base(that) {}
+ private:
+  static constexpr auto kNoThrowCopyCtor =
+      detail::meta::Conjuction<Base::kNoThrowSuccCopyCtor,
+                               Base::kNoThrowErrCopyCtor>::value;
 
+  static constexpr auto kNoThrowMoveCtor =
+      detail::meta::Conjuction<Base::kNoThrowSuccMoveCtor,
+                               Base::kNoThrowErrMoveCtor>::value;
+
+ public:
   constexpr operator bool() const noexcept { return this->IsSuccess(); }
 
- private:
-  // constraints
-  static_assert(
-      not detail::meta::Conjuction<std::is_void<SuccessType>::value,
-                                   std::is_void<ErrorType>::value>::value,
-      "[et::Either] Either<void, void> ill formed");
+  constexpr Either(Either const&) = default;
+  constexpr Either(Either&&) = default;
 
-  static_assert(not std::is_reference<SuccessType>::value,
-                "[et::Either] Either<SuccessType&, ErrorType> ill formed");
+  constexpr Either operator=(Either const&) = default;
+  constexpr Either operator==(Either&&) = default;
 
-  static_assert(not std::is_reference<ErrorType>::value,
-                "[et::Either] Either<SuccessType, ErrorType&> ill formed");
+  constexpr Either(Either<SuccessType, void> const& that) noexcept(
+      Base::kNoThrowSuccCopyCtor)
+      : Base(SuccessTag, that.Success()) {}
+
+  constexpr Either(Either<SuccessType, void>&& that) noexcept(
+      Base::kNoThrowSuccMoveCtor)
+      : Base(SuccessTag,
+             static_cast<Either<SuccessType, void>>(that).Success()) {}
+
+  constexpr Either(Either<void, ErrorType> const& that) noexcept(
+      Base::kNoThrowErrCopyCtor)
+      : Base(ErrorTag, that.Error()) {}
+
+  constexpr Either(Either<void, ErrorType>&& that) noexcept(
+      Base::kNoThrowErrMoveCtor)
+      : Base(ErrorTag, static_cast<Either<void, ErrorType>>(that).Error()) {}
+
+  // Access
+  constexpr auto IsSuccess() const noexcept -> bool {
+    return this->state_ == detail::StorageState::kHasSuccess;
+  }
+  constexpr auto IsError() const noexcept -> bool {
+    return this->state_ == detail::StorageState::kHasError;
+  }
+
+  constexpr auto Success() & -> SuccessType& {
+    return this->is_success_
+               ? this->succ_val_
+               : (throw BadEitherAccess(
+                     "[et::Either<S, E>::Success] invalid state access"));
+  }
+
+  constexpr auto Success() const& -> SuccessType const& {
+    return this->is_success_
+               ? this->succ_val_
+               : (throw BadEitherAccess(
+                     "[et::Either<S, E>::Success] invalid state access"));
+  }
+
+  constexpr auto Success() && -> SuccessType&& {
+    if (this->state_ == detail::StorageState::kHasSuccess) {
+      this->state_ = detail::StorageState::kEmpty;
+      return std::move(this->succ_val_);
+    } else {
+      throw BadEitherAccess("[et::Either<S, E>::Success] invalid state access");
+    }
+  }
+
+  constexpr auto Success() const&& -> SuccessType const&& {
+    if (this->state_ == detail::StorageState::kHasSuccess) {
+      this->state_ = detail::StorageState::kEmpty;
+      return std::move(this->succ_val_);
+    } else {
+      throw BadEitherAccess("[et::Either<S, E>::Success] invalid state access");
+    }
+  }
+
+  constexpr auto Error() & -> ErrorType& {
+    return this->state_ == detail::StorageState::kHasError
+               ? this->err_val_
+               : (throw BadEitherAccess(
+                     "[et::Either<S, E>::Error] invalid state access"));
+  }
+
+  constexpr auto Error() const& -> ErrorType const& {
+    return this->state_ == detail::StorageState::kHasError
+               ? this->err_val_
+               : (throw BadEitherAccess(
+                     "[et::Either<S, E>::Error] invalid state access"));
+  }
+
+  constexpr auto Error() && -> ErrorType&& {
+    if (this->state_ == detail::StorageState::kHasError) {
+      this->state_ = detail::StorageState::kEmpty;
+      return std::move(this->err_val_);
+    } else {
+      throw BadEitherAccess("[et::Either<S, E>::Error] invalid state access");
+    }
+  }
+
+  constexpr auto Error() const&& -> ErrorType const&& {
+    if (this->state_ == detail::StorageState::kHasError) {
+      this->state_ = detail::StorageState::kEmpty;
+      return std::move(this->err_val_);
+    } else {
+      throw BadEitherAccess("[et::Either<S, E>::Error] invalid state access");
+    }
+  }
 };
-
-template <class SS>
-constexpr Either<SS, void> Success(SS succ_val) {
-  static_assert(!std::is_same<detail::UnitStorage<void, void>,
-                              detail::UnitStorage<SS, void>>::value,
-                "[er::Success]");
-
-  return Either<SS, void>(
-      detail::UnitStorage<SS, void>(std::forward<SS>(std::move(succ_val))));
-}
-
-template <class EE>
-constexpr Either<void, EE> Err(EE err_val) {
-  static_assert(!std::is_same<detail::UnitStorage<void, void>,
-                              detail::UnitStorage<void, EE>>::value,
-                "[et::Err]");
-
-  return Either<void, EE>(detail::UnitStorage<void, EE>(std::move(err_val)));
-}
 
 }  // namespace et
 
