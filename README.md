@@ -1,6 +1,6 @@
 # constexpr Either <S, E>
 
-**C++14** header only result monad implementation.
+C++14 header only result monad implementation.
 
 ## Features
 
@@ -16,6 +16,7 @@
     - stricter compile time constraints
     - support for function return types
     - support std::hash for either
+    - write small docs
 
 ## Example
 
