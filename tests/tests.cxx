@@ -7,7 +7,8 @@
 TEST_CASE("Either constexpr Success construction",
           "[either][constructor][constexpr][Success]") {
   auto constexpr et_val = 12;
-  auto constexpr et = et::Either<decltype(et_val), void>(et_val);
+  auto constexpr et =
+      et::Either<std::remove_cv_t<decltype(et_val)>, void>(et_val);
 
   CHECK(et);
   CHECK(et.IsSuccess());
@@ -18,7 +19,8 @@ TEST_CASE("Either constexpr Success construction",
 TEST_CASE("Either constexpr Error construction",
           "[either][constructor][constexpr][Error]") {
   auto constexpr et_val = 'c';
-  auto constexpr et = et::Either<void, decltype(et_val)>(et_val);
+  auto constexpr et =
+      et::Either<void, std::remove_cv_t<decltype(et_val)>>(et_val);
 
   CHECK_FALSE(et);
   CHECK_FALSE(et.IsSuccess());
@@ -134,7 +136,7 @@ TEST_CASE("Either assignment copy 2", "[either][constexpr][assignment]") {
 }
 
 TEST_CASE("Either assignment move 1", "[either][constexpr][assignment]") {
-  auto const et_val = std::string("HelloHelloHelloHelloHelloHelloHello");
+  auto et_val = std::string("HelloHelloHelloHelloHelloHelloHello");
   auto et1 =
       et::Either<std::remove_cv_t<decltype(et_val)>, char>(et::Success(et_val));
 

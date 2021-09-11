@@ -2,9 +2,11 @@
 #define ET_EITHER_HPP_
 
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+
 namespace et {
 
 template <class S, class E>
@@ -18,10 +20,10 @@ struct ErrorTagImpl {};
 using SuccessTagType = SuccessTagImpl const&;
 using ErrorTagType = ErrorTagImpl const&;
 
-}  // namespace detail
-
 constexpr detail::SuccessTagImpl SuccessTag;
 constexpr detail::ErrorTagImpl ErrorTag;
+
+}  // namespace detail
 
 class BadEitherAccess : public std::logic_error {
  public:
@@ -56,6 +58,24 @@ using Non = BoolConstant<!Disjunction<F<Ts>::value...>::value>;
 
 template <class T>
 using NotVoid = BoolConstant<!std::is_void<T>::value>;
+
+template <class...>
+using VoidType = void;
+
+template <class T, class = VoidType<>>
+struct IsPrintable : std::false_type {};
+
+template <class T>
+struct IsPrintable<T, VoidType<decltype(std::cout << ::std::declval<T>())>>
+    : std::true_type {};
+
+template <class T, class = VoidType<>>
+struct IsStdHashable : std::false_type {};
+
+template <class T>
+struct IsStdHashable<
+    T, VoidType<decltype(std::declval<std::hash<T>()(std::declval<T>())>)>>
+    : std::true_type {};
 
 }  // namespace meta
 
@@ -146,8 +166,7 @@ class Storage<S, E, false> {
             class = std::enable_if_t<
                 meta::All<std::is_move_assignable, SS, EE>::value>>
   constexpr Storage(Storage&& that) noexcept(
-      meta::All<std::is_nothrow_move_assignable, SS, EE>::value)
-      : state_(that.state_) {
+      meta::All<std::is_nothrow_move_assignable, SS, EE>::value) {
     state_ = that.state_;
     if (state_ == StorageState::kHasSuccess) {
       succ_val_ = std::move(that.succ_val_);
@@ -204,7 +223,12 @@ struct EitherConstraints {
                 "[et::Either] Either<SuccessType&, ErrorType> ill formed");
 
   static_assert(not std::is_reference<ErrorType>::value,
-                "[et::Either] Either<SuccessType, ErrorType&> ill formed");
+                "[et::Either] Either<SuccessType, ErrorType> ill formed");
+
+  static_assert(
+      std::conditional_t<meta::NotVoid<S>::value, std::is_object<S>,
+                         std::true_type>::value,
+      "[et::Either] Either<SuccessType, ErrorType> only object type supported");
 };
 
 }  // namespace detail
@@ -242,25 +266,25 @@ class Either<S, void> final : detail::EitherConstraints<S, void> {
     return std::move(succ_val_);
   }
 
-  //  constexpr auto Error() const -> ErrorType {
-  //    throw BadEitherAccess("[et::Either<S, void>::Error]");
-  //  }
+  constexpr auto Error() const -> ErrorType {
+    throw BadEitherAccess("[et::Either<S, void>::Error]");
+  }
 
  private:
   SuccessType succ_val_;
 };
 
 template <class E>
-class Either<void, E> {
+class Either<void, E> : private detail::EitherConstraints<void, E> {
  public:
   using SuccessType = void;
   using ErrorType = E;
 
   Either() = delete;
 
-  explicit constexpr Either(ErrorType const& err_val_) noexcept(
+  explicit constexpr Either(ErrorType const& err_val) noexcept(
       std::is_nothrow_copy_constructible<ErrorType>::value)
-      : err_val_(err_val_) {}
+      : err_val_(err_val) {}
 
   explicit constexpr Either(ErrorType&& err_val) noexcept(
       std::is_nothrow_move_constructible<ErrorType>::value)
@@ -271,9 +295,9 @@ class Either<void, E> {
 
   constexpr operator bool() const noexcept { return false; }
 
-  //  constexpr auto Success() const -> SuccessType {
-  //    throw BadEitherAccess("[et::Either<void, E>::Success]");
-  //  }
+  constexpr auto Success() const -> SuccessType {
+    throw BadEitherAccess("[et::Either<void, E>::Success]");
+  }
 
   //  constexpr auto Error() & noexcept -> ErrorType& { return err_val_; }
   constexpr auto Error() const& noexcept -> ErrorType const& {
@@ -302,7 +326,8 @@ constexpr auto Error(EE&& err_val) {
 }
 
 template <class S, class E>
-class Either final : private detail::Storage<S, E> {
+class Either final : private detail::Storage<S, E>,
+                     detail::EitherConstraints<S, E> {
  private:
   using Base = detail::Storage<S, E>;
 
@@ -346,26 +371,27 @@ class Either final : private detail::Storage<S, E> {
             class = std::enable_if_t<std::is_copy_constructible<SS>::value>>
   constexpr Either(Either<SuccessType, void> const& that) noexcept(
       std::is_nothrow_copy_constructible<SuccessType>::value)
-      : Base(SuccessTag, that.Success()) {}
+      : Base(detail::SuccessTag, that.Success()) {}
 
   template <class SS = SuccessType,
             class = std::enable_if_t<std::is_move_constructible<SS>::value>>
   constexpr Either(Either<SuccessType, void>&& that) noexcept(
       std::is_nothrow_move_constructible<SuccessType>::value)
-      : Base(SuccessTag,
+      : Base(detail::SuccessTag,
              static_cast<Either<SuccessType, void>>(that).Success()) {}
 
   template <class EE = ErrorType,
             class = std::enable_if_t<std::is_copy_constructible<EE>::value>>
   constexpr Either(Either<void, ErrorType> const& that) noexcept(
       std::is_nothrow_copy_constructible<ErrorType>::value)
-      : Base(ErrorTag, that.Error()) {}
+      : Base(detail::ErrorTag, that.Error()) {}
 
   template <class EE = ErrorType,
             class = std::enable_if_t<std::is_move_constructible<EE>::value>>
   constexpr Either(Either<void, ErrorType>&& that) noexcept(
       std::is_nothrow_move_constructible<ErrorType>::value)
-      : Base(ErrorTag, static_cast<Either<void, ErrorType>>(that).Error()) {}
+      : Base(detail::ErrorTag,
+             static_cast<Either<void, ErrorType>>(that).Error()) {}
 
   // conversion assignment
   template <class SS = SuccessType,
@@ -491,6 +517,67 @@ class Either final : private detail::Storage<S, E> {
   }
 };
 
+template <class S, class E>
+bool operator==(Either<S, E> const& lhs, Either<S, E> const& rhs) noexcept;
+
+template <class S>
+bool operator==(Either<S, void> const& lhs,
+                Either<S, void> const& rhs) noexcept {
+  return lhs.Success() == rhs.Success();
+}
+
+template <class E>
+bool operator==(Either<void, E> const& lhs,
+                Either<void, E> const& rhs) noexcept {
+  return rhs.Error() == rhs.Error();
+}
+
+template <class S, class E>
+bool operator==(Either<S, void> const& lhs,
+                Either<void, E> const& rhs) noexcept {
+  return false;
+}
+
+template <class S, class E>
+bool operator==(Either<S, E> const& lhs, Either<S, E> const& rhs) noexcept {
+  if (lhs.IsSuccess() && rhs.IsSuccess()) {
+    return lhs.Success() == rhs.Success();
+  } else if (lhs.IsError() == rhs.IsError()) {
+    return lhs.Error() == rhs.Error();
+  }
+
+  return false;
+}
+
+template <class S, class E>
+bool operator!=(Either<S, E> const& lhs, Either<S, E> const& rhs) noexcept {
+  return !(lhs == rhs);
+}
+
+template <class S, class E>
+std::ostream& operator<<(std::ostream&, Either<S, E> const&);
+
+template <class S>
+std::ostream& operator<<(std::ostream& os, Either<S, void> const& e) {
+  return os << e.Success();
+}
+
+template <class E>
+std::ostream& operator<<(std::ostream& os, Either<void, E> const e) {
+  return os << e.Error();
+}
+
+template <class S, class E>
+std::ostream& operator<<(std::ostream& os, Either<S, E> const& e) {
+  if (e) {
+    return os << e.Success();
+  } else {
+    return os << e.Error();
+  }
+}
+}  // namespace et
+
+namespace et {
 namespace detail {
 namespace asserts {
 
