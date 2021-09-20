@@ -119,20 +119,28 @@ class Storage {
     }
   }
 
+  template <class SS = SuccessType,
+            class = std::enable_if_t<std::is_copy_constructible<SS>::value>>
   constexpr Storage(SuccessTagType, SuccessType const& succ_val) noexcept(
       std::is_nothrow_copy_constructible<SuccessType>::value)
       : state_(StorageState::kHasSuccess), succ_val_(succ_val) {}
 
+  template <class SS = SuccessType,
+            class = std::enable_if_t<std::is_move_constructible_v<SS>>>
   constexpr Storage(SuccessTagType, SuccessType&& succ_val) noexcept(
-      std::is_nothrow_move_constructible<SuccessType>::value)
+      std::is_nothrow_move_constructible_v<SuccessType>)
       : state_(StorageState::kHasSuccess), succ_val_(std::move(succ_val)) {}
 
+  template <class EE = ErrorType,
+            class = std::enable_if_t<std::is_copy_constructible_v<EE>>>
   constexpr Storage(ErrorTagType, ErrorType const& err_val) noexcept(
       std::is_nothrow_copy_constructible<ErrorType>::value)
       : state_(StorageState::kHasError), err_val_(err_val) {}
 
+  template <class EE = ErrorType,
+            class = std::enable_if_t<std::is_move_constructible_v<EE>>>
   constexpr Storage(ErrorTagType, ErrorType&& err_val) noexcept(
-      std::is_nothrow_move_constructible<ErrorType>::value)
+      std::is_nothrow_move_constructible_v<ErrorType>)
       : state_(StorageState::kHasError), err_val_(std::move(err_val)) {}
 
   StorageState state_;
@@ -177,20 +185,28 @@ class Storage<S, E, false> {
     }
   }
 
+  template <class SS = SuccessType,
+            class = std::enable_if_t<std::is_copy_constructible_v<SS>>>
   constexpr Storage(SuccessTagType, SuccessType const& succ_val) noexcept(
-      std::is_nothrow_copy_constructible<SuccessType>::value)
+      std::is_nothrow_copy_constructible_v<SuccessType>)
       : state_(StorageState::kHasSuccess), succ_val_(succ_val) {}
 
+  template <class SS = SuccessType,
+            class = std::enable_if_t<std::is_move_constructible_v<SS>>>
   constexpr Storage(SuccessTagType, SuccessType&& succ_val) noexcept(
-      std::is_nothrow_move_constructible<SuccessType>::value)
+      std::is_nothrow_move_constructible_v<SuccessType>)
       : state_(StorageState::kHasSuccess), succ_val_(std::move(succ_val)) {}
 
+  template <class EE = ErrorType,
+            class = std::enable_if_t<std::is_copy_constructible_v<EE>>>
   constexpr Storage(ErrorTagType, ErrorType const& err_val) noexcept(
       std::is_nothrow_copy_constructible<ErrorType>::value)
       : state_(StorageState::kHasError), err_val_(err_val) {}
 
+  template <class EE = ErrorType,
+            class = std::enable_if_t<std::is_move_constructible_v<EE>>>
   constexpr Storage(ErrorTagType, ErrorType&& err_val) noexcept(
-      std::is_nothrow_move_constructible<ErrorType>::value)
+      std::is_nothrow_move_constructible_v<ErrorType>)
       : state_(StorageState::kHasError), err_val_(std::move(err_val)) {}
 
   ~Storage() noexcept(
@@ -219,10 +235,10 @@ struct EitherConstraints {
                                    std::is_void<ErrorType>::value>::value,
       "[et::Either] Either<void, void> ill formed");
 
-  static_assert(not std::is_reference<SuccessType>::value,
+  static_assert(not std::is_reference_v<SuccessType>,
                 "[et::Either] Either<SuccessType&, ErrorType> ill formed");
 
-  static_assert(not std::is_reference<ErrorType>::value,
+  static_assert(not std::is_reference_v<ErrorType>,
                 "[et::Either] Either<SuccessType, ErrorType> ill formed");
 
   static_assert(
@@ -241,10 +257,14 @@ class Either<S, void> final : detail::EitherConstraints<S, void> {
 
   Either() = delete;
 
+  template <class SS = SuccessType,
+            class = std::enable_if_t<std::is_copy_constructible<SS>::value>>
   explicit constexpr Either(SuccessType const& succ_val) noexcept(
       std::is_nothrow_copy_constructible<SuccessType>::value)
       : succ_val_(succ_val) {}
 
+  template <class SS = SuccessType,
+            class = std::enable_if_t<std::is_move_constructible<SS>::value>>
   explicit constexpr Either(SuccessType&& succ_val) noexcept(
       std::is_nothrow_move_constructible<ErrorType>::value)
       : succ_val_(std::move(succ_val)) {}
@@ -282,10 +302,14 @@ class Either<void, E> : private detail::EitherConstraints<void, E> {
 
   Either() = delete;
 
+  template <class EE = ErrorType,
+            class = std::enable_if_t<std::is_copy_constructible<EE>::value>>
   explicit constexpr Either(ErrorType const& err_val) noexcept(
       std::is_nothrow_copy_constructible<ErrorType>::value)
       : err_val_(err_val) {}
 
+  template <class EE = ErrorType,
+            class = std::enable_if_t<std::is_move_constructible<EE>::value>>
   explicit constexpr Either(ErrorType&& err_val) noexcept(
       std::is_nothrow_move_constructible<ErrorType>::value)
       : err_val_(std::move(err_val)) {}
@@ -515,6 +539,14 @@ class Either final : private detail::Storage<S, E>,
       throw BadEitherAccess("[et::Either<S, E>::Error] invalid state access");
     }
   }
+
+  template <class Fn, class SS, class EE,
+            class = std::enable_if_t<
+                std::is_invocable_v<Fn, Either<SuccessType, ErrorType>>>>
+  [[nodiscard]] constexpr auto Map(Fn&& f) noexcept(
+      std::is_nothrow_invocable_v<Fn, Either<SuccessType, ErrorType>>) {
+    return Map(*this);
+  }
 };
 
 template <class S, class E>
@@ -575,48 +607,6 @@ std::ostream& operator<<(std::ostream& os, Either<S, E> const& e) {
     return os << e.Error();
   }
 }
-}  // namespace et
-
-namespace et {
-namespace detail {
-namespace asserts {
-
-struct NotCopyable {
-  NotCopyable() = default;
-
-  NotCopyable(NotCopyable const&) = delete;
-  NotCopyable& operator=(NotCopyable const&) = delete;
-
-  NotCopyable(NotCopyable&&) = default;
-  NotCopyable& operator=(NotCopyable&&) = default;
-};
-
-struct NotMovable {
-  NotMovable() = default;
-
-  NotMovable(NotMovable const&) = default;
-  NotMovable& operator=(NotMovable const&) = default;
-
-  NotMovable(NotMovable&&) = delete;
-  NotMovable& operator=(NotMovable&&) = delete;
-};
-
-struct NoCopyMove : NotCopyable, NotMovable {};
-
-using NoCopyMoveEitherSuccess = Either<NoCopyMove, void>;
-using NoCopyMoveEitherError = Either<void, NoCopyMove>;
-
-static_assert(!std::is_constructible<Either<NoCopyMove, char>,
-                                     NoCopyMoveEitherSuccess>::value,
-              "");
-
-static_assert(!std::is_constructible<Either<char, NoCopyMove>,
-                                     NoCopyMoveEitherError>::value,
-              "");
-
-}  // namespace asserts
-}  // namespace detail
-
 }  // namespace et
 
 #endif  // ET_EITHER_HPP_

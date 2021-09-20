@@ -1,6 +1,6 @@
 # constexpr Either <S, E>
 
-C++14 header only result monad implementation.
+C++14 header only algebraic result type.
 
 ## Features
 
@@ -15,7 +15,6 @@ C++14 header only result monad implementation.
     - expand test coverage
     - stricter compile time constraints
     - support for function return types
-    - support std::hash for either
     - write small docs
 
 ## Example
