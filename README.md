@@ -1,6 +1,6 @@
 # constexpr Either <S, E>
 
-C++14 header only result monad implementation.
+C++14 header only result type implementation.
 
 ## Features
 
